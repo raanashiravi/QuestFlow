@@ -52,6 +52,7 @@ export const ConnectCalendarPage: React.FC<ConnectCalendarPageProps> = ({
   onDisconnectGoogle,
 }) => {
   // Tabs: Outlook/Link (default), Google Calendar, Upload ICS, or Paste Text
+  const isPublicDemo = import.meta.env.VITE_PUBLIC_DEMO === 'true';
   const [activeTab, setActiveTab] = useState<'outlook' | 'google' | 'ics' | 'text'>('outlook');
 
   // Outlook URL state
@@ -306,22 +307,24 @@ export const ConnectCalendarPage: React.FC<ConnectCalendarPageProps> = ({
           <span>Outlook / Link</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('google');
-            setErrorNotice(null);
-            onClearGoogleError();
-          }}
-          className={`flex-1 min-w-[130px] sm:min-w-0 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'google'
-              ? 'bg-[var(--sky-strong)] text-white shadow-2xs font-bold'
-              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-          }`}
-        >
-          <Calendar className="w-3.5 h-3.5" />
-          <span>Google Calendar</span>
-        </button>
+        {!isPublicDemo && (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('google');
+              setErrorNotice(null);
+              onClearGoogleError();
+            }}
+            className={`flex-1 min-w-[130px] sm:min-w-0 py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'google'
+                ? 'bg-[var(--sky-strong)] text-white shadow-2xs font-bold'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Google Calendar</span>
+          </button>
+        )}
 
         <button
           type="button"

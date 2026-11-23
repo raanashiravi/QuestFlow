@@ -129,9 +129,13 @@ export default function App() {
   );
 
   // Page Stepper navigation state:
+  // - In public demo mode, always open straight on 'welcome' (Home)
   // - First-run visitors land on 'welcome'
   // - Returning users with meetings loaded open directly on 'review' (Calendar)
   const [currentPage, setCurrentPage] = useState<AppPage>(() => {
+    if (import.meta.env.VITE_PUBLIC_DEMO === 'true') {
+      return 'welcome';
+    }
     try {
       const hasVisited = localStorage.getItem('questflow_visited_v6') === 'true';
       localStorage.setItem('questflow_visited_v6', 'true');
@@ -455,8 +459,9 @@ export default function App() {
   // Load UW Sample walkthrough and open Calendar (Tutorial mode)
   const handleStartSampleWalkthrough = () => {
     const todayStr = getTodayLocalDateString();
-    setSelectedDate(todayStr);
     const sample = getSampleDayMeetings(todayStr);
+    const sampleDate = sample[0]?.date || todayStr;
+    setSelectedDate(sampleDate);
     setTutorialMeetings(sample);
     setActiveSource('tutorial');
     setSettings((prev) => ({

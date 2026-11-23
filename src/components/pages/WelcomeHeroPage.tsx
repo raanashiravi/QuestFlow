@@ -16,6 +16,8 @@ export const WelcomeHeroPage: React.FC<WelcomeHeroPageProps> = ({
   onStartSampleWalkthrough,
   onConnectCalendar,
 }) => {
+  const isPublicDemo = import.meta.env.VITE_PUBLIC_DEMO === 'true';
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 min-h-[calc(100vh-5rem)] flex flex-col items-center justify-center py-12 animate-in fade-in duration-200">
       <section className="text-center space-y-8 w-full">
@@ -49,6 +51,12 @@ export const WelcomeHeroPage: React.FC<WelcomeHeroPageProps> = ({
             <ArrowRight className="w-4 h-4 shrink-0 opacity-60" />
           </button>
         </div>
+
+        {isPublicDemo && (
+          <p className="text-xs sm:text-sm text-[var(--text-secondary)] font-medium">
+            Public demo — try the tutorial. Calendar sync is shown at our booth.
+          </p>
+        )}
       </section>
     </div>
   );

@@ -1,7 +1,106 @@
 import { CampusMeeting } from '../types';
 import { getTodayLocalDateString, getTodayTorontoDateString } from '../utils/icsParser';
+import { formatMinutesToTime } from '../utils/travelCalculator';
 
 export function getSampleDayMeetings(overrideDate?: string): CampusMeeting[] {
+  const isPublicDemo = import.meta.env.VITE_PUBLIC_DEMO === 'true';
+
+  if (isPublicDemo) {
+    const now = new Date();
+    const currentMin = now.getHours() * 60 + now.getMinutes();
+    // Round up to the next 15 minutes (T)
+    let T = Math.ceil((currentMin + 1) / 15) * 15;
+    let targetDate = overrideDate || getTodayLocalDateString(now);
+
+    // If T - 3h15 (< 0) or T + 3h45 (>= 1440) would cross midnight, put the tutorial on the next day
+    if (T - 195 < 0 || T + 225 >= 1440) {
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+      targetDate = getTodayLocalDateString(tomorrow);
+      T = 12 * 60 + 45; // 12:45 PM so T-3h15 is 9:30 AM and T+3h45 is 4:30 PM
+    }
+
+    return [
+      {
+        id: 'sample-1',
+        title: 'Team sync',
+        date: targetDate,
+        startTime: formatMinutesToTime(T - 195), // T - 3h15
+        endTime: formatMinutesToTime(T - 150),   // T - 2h30
+        format: 'in_person',
+        buildingCode: 'MC',
+        roomNumber: '5479',
+        floor: 5,
+        rawLocation: 'MC 5479',
+        source: 'sample',
+        organizer: 'Prof. Sarah Chen (Associate Dean)',
+        notes: 'Weekly faculty alignment on curriculum and lab space allocations.',
+      },
+      {
+        id: 'sample-2',
+        title: 'Budget review',
+        date: targetDate,
+        startTime: formatMinutesToTime(T + 60),  // T + 1h00
+        endTime: formatMinutesToTime(T + 105),   // T + 1h45
+        format: 'in_person',
+        buildingCode: 'NH',
+        roomNumber: '3001',
+        floor: 3,
+        rawLocation: 'NH 3001',
+        source: 'sample',
+        organizer: 'Marcus Vance (Finance & Staffing)',
+        notes: 'Quarterly administrative budget and operating grants review in Needles Hall.',
+      },
+      {
+        id: 'sample-3',
+        title: 'IT check-in',
+        date: targetDate,
+        startTime: formatMinutesToTime(T + 105), // T + 1h45
+        endTime: formatMinutesToTime(T + 135),   // T + 2h15
+        format: 'in_person',
+        buildingCode: 'DC',
+        roomNumber: '1302',
+        floor: 1,
+        rawLocation: 'DC 1302',
+        source: 'sample',
+        organizer: 'David Kim (IST Infrastructure)',
+        notes: 'Campus network hardware upgrade and high-performance computing cluster update.',
+      },
+      {
+        id: 'sample-4',
+        title: 'Curriculum committee',
+        date: targetDate,
+        startTime: formatMinutesToTime(T + 145), // T + 2h25
+        endTime: formatMinutesToTime(T + 175),   // T + 2h55
+        format: 'hybrid',
+        buildingCode: 'E7',
+        roomNumber: '2409',
+        floor: 2,
+        rawLocation: 'E7 2409 / Microsoft Teams',
+        onlineLink: 'https://teams.microsoft.com/l/meetup-join/uwaterloo-grad-committee',
+        source: 'sample',
+        organizer: 'Dr. Priya Patel (Graduate Studies)',
+        notes: 'Hybrid session. In-person discussion in E7 2409 with Teams broadcast for remote fellows.',
+      },
+      {
+        id: 'sample-5',
+        title: 'Vendor call',
+        date: targetDate,
+        startTime: formatMinutesToTime(T + 195), // T + 3h15
+        endTime: formatMinutesToTime(T + 225),   // T + 3h45
+        format: 'online',
+        buildingCode: 'ONLINE',
+        roomNumber: '',
+        floor: 1,
+        rawLocation: 'Microsoft Teams',
+        onlineLink: 'https://teams.microsoft.com/l/meetup-join/uwaterloo-toronto-consortium',
+        source: 'sample',
+        organizer: 'Elena Rostova (Consortium Director)',
+        notes: 'Virtual partnership sync between UWaterloo and research affiliates.',
+      },
+    ];
+  }
+
   const today = overrideDate || getTodayLocalDateString();
 
   return [
