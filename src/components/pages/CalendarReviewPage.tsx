@@ -65,6 +65,21 @@ function formatTimeCompact(timeStr: string): string {
   return `${h}:${m.toString().padStart(2, '0')}`;
 }
 
+function formatTimeRangePhone(startTime: string, endTime: string): string {
+  if (!startTime || !endTime) return '';
+  const [shStr] = startTime.split(':');
+  const [ehStr] = endTime.split(':');
+  const sh = parseInt(shStr, 10);
+  const eh = parseInt(ehStr, 10);
+  if (isNaN(sh) || isNaN(eh)) return `${formatTime12h(startTime)}–${formatTime12h(endTime)}`;
+  const startPeriod = sh >= 12 ? 'PM' : 'AM';
+  const endPeriod = eh >= 12 ? 'PM' : 'AM';
+  if (startPeriod === endPeriod) {
+    return `${formatTimeCompact(startTime)}–${formatTimeCompact(endTime)} ${endPeriod}`;
+  }
+  return `${formatTimeCompact(startTime)} ${startPeriod}–${formatTimeCompact(endTime)} ${endPeriod}`;
+}
+
 interface ProblemPair {
   id: string;
   earlier: CampusMeeting;
@@ -256,9 +271,22 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
     setIsEditingOffice(false);
   };
 
-  // Measure schedule canvas width to detect narrow cards (< ~320px)
+  // Measure schedule canvas width and phone viewport (< 640px)
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState<number>(640);
+  const [isPhoneViewport, setIsPhoneViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 640 : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      setIsPhoneViewport(window.innerWidth < 640);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -617,8 +645,17 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
         (showWalkToOffice ? 1 : 0) +
         (showAtOffice ? 1 : 0) +
         (showWalkFromOffice ? 1 : 0);
-      const minVisualHeightPx =
-        visibleParts === 3 ? 96 : visibleParts === 2 ? 64 : 30;
+      const minVisualHeightPx = isPhoneViewport
+        ? visibleParts === 3
+          ? 144
+          : visibleParts === 2
+          ? 96
+          : 48
+        : visibleParts === 3
+        ? 96
+        : visibleParts === 2
+        ? 64
+        : 30;
 
       gapLegs.push({
         leg,
@@ -679,7 +716,7 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
         topMin: curEnd,
         gapMin,
         isOfficeTrip: false,
-        minVisualHeightPx: 30,
+        minVisualHeightPx: isPhoneViewport ? 48 : 30,
       });
     }
 
@@ -694,7 +731,7 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
     );
     const officeRowTopMin =
       hasOfficeFirstInUpcoming && officeFirstWalk
-        ? officeFirstWalk.startMin - Math.max(18, officeFirstWalk.walkMinutes + officeFirstWalk.bufferMinutes)
+        ? officeFirstWalk.startMin - Math.max(isPhoneViewport ? 22 : 18, officeFirstWalk.walkMinutes + officeFirstWalk.bufferMinutes)
         : earliestStart;
 
     const earliestGapTopMin =
@@ -727,7 +764,19 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
     const cardPaddingIntervals: { startMin: number; endMin: number; extraPx: number }[] = [];
     for (const p of positioned) {
       const naturalCardPx = (p.endMin - p.startMin) * PIXELS_PER_MIN;
-      const extraCardPx = Math.max(0, 54 - naturalCardPx);
+      const isInProgressCard =
+        isToday && p.startMin <= currentMinutes && currentMinutes < p.endMin;
+      const hasLine3OnPhone =
+        isPhoneViewport &&
+        (isInProgressCard ||
+          Boolean(problemByTargetId[p.meeting.id]) ||
+          Boolean(resolvedByMeetingId[p.meeting.id]));
+      const minRequiredCardPx = isPhoneViewport
+        ? hasLine3OnPhone
+          ? 114
+          : 74
+        : 54;
+      const extraCardPx = Math.max(0, minRequiredCardPx - naturalCardPx);
       if (extraCardPx <= 0) continue;
       const last = cardPaddingIntervals[cardPaddingIntervals.length - 1];
       if (last && p.startMin < last.endMin) {
@@ -789,7 +838,19 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
       hasOfficeFirstInUpcoming,
       getTopPxForMin,
     };
-  }, [passedMeetings, upcomingMeetings, isToday, currentMinutes, travelLegs, officeFirstWalk, departureByMeetingId, settings.office]);
+  }, [
+    passedMeetings,
+    upcomingMeetings,
+    isToday,
+    currentMinutes,
+    travelLegs,
+    officeFirstWalk,
+    departureByMeetingId,
+    settings.office,
+    isPhoneViewport,
+    problemByTargetId,
+    resolvedByMeetingId,
+  ]);
 
   const writtenDate = formatWrittenDate(selectedDate);
 
@@ -816,14 +877,36 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
 
     const showOfficeWalkRow =
       officeFirstWalk && officeFirstWalk.meetingId === meeting.id;
+    const isMenuOpen = openMenuMeetingId === meeting.id;
+    const locCompact = isOnline
+      ? 'Teams'
+      : isLocationUnknown
+      ? 'Set location'
+      : `${meeting.buildingCode}${meeting.roomNumber ? ` ${meeting.roomNumber}` : ''}`;
+    const phoneTimeAndPlace = `${formatTimeRangePhone(
+      meeting.startTime,
+      meeting.endTime
+    )} · ${locCompact}`;
+    const hasPassedLine3 = Boolean(wasLateToday || targetProblem || isResolved);
 
     return (
       <div className="space-y-1.5" id={`meeting-block-${meeting.id}`}>
         {showOfficeWalkRow && officeFirstWalk && (
-          <div className="px-3 py-1.5 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] text-[11px] font-bold flex items-center justify-between gap-2">
+          <div className="px-3 py-1.5 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] text-[13px] sm:text-[11px] font-bold flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
-              <Footprints className="w-3.5 h-3.5 shrink-0 text-[var(--sky)]" />
-              <span className="truncate">{officeFirstWalk.label}</span>
+              <Footprints className="w-4 h-4 sm:w-3.5 sm:h-3.5 shrink-0 text-[var(--sky)]" />
+              {isPhoneViewport ? (
+                <div className="min-w-0 leading-tight">
+                  <div className="truncate">
+                    {officeFirstWalk.fromBuildingCode} → {officeFirstWalk.toBuildingCode} · {officeFirstWalk.walkMinutes}m
+                  </div>
+                  <div className="text-[13px] text-[var(--text-secondary)] font-semibold truncate">
+                    leave by {officeFirstWalk.leaveBy12h}
+                  </div>
+                </div>
+              ) : (
+                <span className="truncate">{officeFirstWalk.label}</span>
+              )}
             </div>
             <a
               href={getGoogleMapsDirectionsUrl(
@@ -833,15 +916,156 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
               )}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[10px] font-bold shadow-2xs transition-colors shrink-0"
+              aria-label="Route"
+              className="inline-flex items-center justify-center gap-1 min-w-[40px] min-h-[40px] sm:min-w-0 sm:min-h-0 px-2 py-0.5 rounded-md bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[13px] sm:text-[10px] font-bold shadow-2xs transition-colors shrink-0"
               title="Open walking directions from office in Google Maps"
             >
-              <Navigation className="w-2.5 h-2.5" />
-              <span>Route</span>
-              <ExternalLink className="w-2 h-2 opacity-75" />
+              <Navigation className="w-4 h-4 sm:w-2.5 sm:h-2.5" />
+              <span className="hidden sm:inline">Route</span>
+              <ExternalLink className="hidden sm:inline w-2 h-2 opacity-75" />
             </a>
           </div>
         )}
+        {isPhoneViewport ? (
+          <div
+            onClick={() => onEditMeeting(meeting)}
+            className={`px-3 py-2.5 rounded-xl border relative cursor-pointer flex items-start justify-between gap-2 ${
+              hasPassedLine3 ? 'min-h-[112px]' : 'min-h-[72px]'
+            } ${
+              format === 'online'
+                ? 'bg-[var(--bg-card)] border-[var(--border)] border-l-4 border-l-[var(--oatmeal)] text-[var(--text-primary)]'
+                : 'bg-[var(--sky-tint)] border-[var(--border)] border-l-4 border-l-[var(--sky)] text-[var(--sky-strong)]'
+            }`}
+          >
+            <div className="min-w-0 flex-1 flex flex-col justify-between">
+              <div className="min-w-0">
+                <p
+                  className={`text-[13px] font-extrabold line-clamp-2 leading-tight ${
+                    format === 'online' ? 'text-[var(--text-primary)]' : 'text-[var(--sky-strong)]'
+                  }`}
+                >
+                  {meeting.title}
+                </p>
+                <p
+                  className={`text-[13px] font-semibold truncate mt-0.5 tabular-nums ${
+                    format === 'online' ? 'text-[var(--text-secondary)]' : 'text-[var(--sky-strong)]'
+                  }`}
+                >
+                  {phoneTimeAndPlace}
+                </p>
+              </div>
+              {hasPassedLine3 && (
+                <div
+                  className="flex items-center gap-1.5 flex-nowrap mt-1.5 min-w-0"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {wasLateToday && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-secondary)] text-[13px] font-semibold shrink-0">
+                      <Clock className="w-3.5 h-3.5 shrink-0" />
+                      <span>Was late</span>
+                    </span>
+                  )}
+                  {targetProblem && (
+                    <span
+                      id={`transition-problem-${meeting.id}`}
+                      className="inline-flex items-center gap-1.5 min-w-0"
+                    >
+                      <span
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[13px] font-extrabold truncate ${
+                          isTight
+                            ? 'bg-[var(--status-tight-bg)] text-[var(--status-tight-fg)]'
+                            : 'bg-[var(--status-late-bg)] text-[var(--status-late-fg)]'
+                        }`}
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{targetProblem.badgeText}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenFixSheet(targetProblem)}
+                        className={`inline-flex items-center justify-center min-h-[40px] px-2.5 py-1 rounded-lg text-white text-[13px] font-extrabold shadow-2xs transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sky-strong)] ${
+                          isTight
+                            ? 'bg-[var(--status-tight-fg)] hover:opacity-90'
+                            : 'bg-[var(--status-late-fg)] hover:opacity-90'
+                        }`}
+                      >
+                        Fix this
+                      </button>
+                    </span>
+                  )}
+                  {!targetProblem && isResolved && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] text-[13px] font-extrabold shrink-0">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Fixed</span>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <div
+              className="relative shrink-0 -mt-1 -mr-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setOpenMenuMeetingId(isMenuOpen ? null : meeting.id)}
+                aria-label="More actions"
+                className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] p-1.5 rounded-lg bg-[var(--bg-main)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer text-[15px] font-bold leading-none"
+              >
+                ⋯
+              </button>
+              {isMenuOpen && (
+                <div className="absolute right-0 top-10 w-44 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-xl py-1 z-40 text-[13px] font-semibold">
+                  {!isOnline && !isLocationUnknown && (
+                    <a
+                      href={mapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setOpenMenuMeetingId(null)}
+                      className="flex items-center gap-2 min-h-[40px] px-3 py-2 text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    >
+                      <Navigation className="w-4 h-4 text-[var(--sky)]" />
+                      <span>Open in Maps</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onQuickToggleFormat(meeting.id, isOnline ? 'in_person' : 'online');
+                      setOpenMenuMeetingId(null);
+                    }}
+                    className="w-full flex items-center gap-2 min-h-[40px] px-3 py-2 text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                  >
+                    <Video className="w-4 h-4 text-[var(--sky)]" />
+                    <span>{isOnline ? 'Switch to Campus' : 'Switch to Teams'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenMenuMeetingId(null);
+                      onEditMeeting(meeting);
+                    }}
+                    className="w-full flex items-center gap-2 min-h-[40px] px-3 py-2 text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                  >
+                    <Edit3 className="w-4 h-4 text-[var(--text-muted)]" />
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenMenuMeetingId(null);
+                      onDeleteMeeting(meeting.id);
+                    }}
+                    className="w-full flex items-center gap-2 min-h-[40px] px-3 py-2 text-left text-[var(--status-late-fg)] hover:bg-[var(--status-late-bg)] cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
         <div
           className={`px-3.5 py-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
             format === 'online'
@@ -985,6 +1209,7 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
           )}
         </div>
       </div>
+      )}
     </div>
   );
   };
@@ -1369,13 +1594,13 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] shadow-2xs overflow-hidden">
             <div className="flex relative" style={{ height: `${timelineLayout.totalHeight + 24}px` }}>
               {/* Left Hour Axis */}
-              <div className="w-14 sm:w-16 shrink-0 border-r border-[var(--border)] bg-[var(--bg-card)] relative select-none">
+              <div className="w-[46px] sm:w-16 shrink-0 border-r border-[var(--border)] bg-[var(--bg-card)] relative select-none">
                 {timelineLayout.hours.map((hour) => {
                   const topPx = timelineLayout.getTopPxForMin(hour * 60);
                   return (
                     <div
                       key={hour}
-                      className="absolute right-2 -translate-y-1/2 text-[11px] font-bold text-[var(--text-muted)] tabular-nums"
+                      className="absolute right-1 sm:right-2 -translate-y-1/2 text-[13px] sm:text-[11px] tracking-tight sm:tracking-normal font-bold text-[var(--text-muted)] tabular-nums whitespace-nowrap"
                       style={{ top: `${topPx}px` }}
                     >
                       {formatHourAxis(hour)}
@@ -1386,7 +1611,7 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                 {/* Current time pill on axis */}
                 {showNowLine && (
                   <div
-                    className="absolute right-1 -translate-y-1/2 px-1.5 py-0.5 rounded bg-[var(--sky-strong)] text-white text-[10px] font-extrabold tabular-nums shadow-xs z-20"
+                    className="absolute right-1 -translate-y-1/2 px-1 sm:px-1.5 py-0.5 rounded bg-[var(--sky-strong)] text-white text-[13px] sm:text-[10px] font-extrabold tabular-nums shadow-xs z-20"
                     style={{
                       top: `${timelineLayout.getTopPxForMin(currentMinutes)}px`,
                     }}
@@ -1424,21 +1649,32 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                   officeFirstWalk &&
                   (() => {
                     const rowSpanMin = Math.max(
-                      16,
+                      isPhoneViewport ? 22 : 16,
                       officeFirstWalk.walkMinutes + officeFirstWalk.bufferMinutes
                     );
                     const topMin = officeFirstWalk.startMin - rowSpanMin;
                     const topPx = timelineLayout.getTopPxForMin(topMin);
                     const bottomPx = timelineLayout.getTopPxForMin(officeFirstWalk.startMin);
-                    const heightPx = Math.max(26, bottomPx - topPx - 4);
+                    const heightPx = Math.max(isPhoneViewport ? 44 : 26, bottomPx - topPx - 4);
                     return (
                       <div
-                        className="absolute left-2.5 right-2.5 rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] px-3 flex items-center justify-between gap-2 z-10 text-xs"
+                        className="absolute left-2.5 right-2.5 rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] px-2.5 sm:px-3 flex items-center justify-between gap-2 z-10 text-[13px] sm:text-xs"
                         style={{ top: `${topPx}px`, height: `${heightPx}px` }}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Footprints className="w-3.5 h-3.5 shrink-0 text-[var(--sky)]" />
-                          <span className="font-bold truncate">{officeFirstWalk.label}</span>
+                        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                          <Footprints className="w-4 h-4 sm:w-3.5 sm:h-3.5 shrink-0 text-[var(--sky)]" />
+                          {isPhoneViewport ? (
+                            <div className="min-w-0 leading-tight">
+                              <div className="font-bold truncate">
+                                {officeFirstWalk.fromBuildingCode} → {officeFirstWalk.toBuildingCode} · {officeFirstWalk.walkMinutes}m
+                              </div>
+                              <div className="text-[13px] text-[var(--text-secondary)] font-semibold truncate">
+                                leave by {officeFirstWalk.leaveBy12h}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="font-bold truncate">{officeFirstWalk.label}</span>
+                          )}
                         </div>
                         <a
                           href={getGoogleMapsDirectionsUrl(
@@ -1448,12 +1684,13 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                           )}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[11px] font-bold shadow-2xs transition-colors shrink-0"
+                          aria-label="Route"
+                          className="inline-flex items-center justify-center gap-1 min-w-[40px] min-h-[40px] sm:min-w-0 sm:min-h-0 px-2 sm:px-2.5 py-1 rounded-lg bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[13px] sm:text-[11px] font-bold shadow-2xs transition-colors shrink-0"
                           title="Open walking directions from office in Google Maps"
                         >
-                          <Navigation className="w-3 h-3" />
-                          <span>Route</span>
-                          <ExternalLink className="w-2.5 h-2.5 opacity-75" />
+                          <Navigation className="w-4 h-4 sm:w-3 sm:h-3" />
+                          <span className="hidden sm:inline">Route</span>
+                          <ExternalLink className="hidden sm:inline w-2.5 h-2.5 opacity-75" />
                         </a>
                       </div>
                     );
@@ -1474,7 +1711,7 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                   }) => {
                     const slotTopPx = timelineLayout.getTopPxForMin(topMin, false);
                     const slotBottomPx = timelineLayout.getTopPxForMin(topMin + gapMin, true);
-                    const slotSpanPx = Math.max(28, slotBottomPx - slotTopPx);
+                    const slotSpanPx = Math.max(isPhoneViewport ? 44 : 28, slotBottomPx - slotTopPx);
 
                     const nxtDep = departureByMeetingId[leg.toMeeting.id];
                     if (isOfficeTrip && nxtDep && settings.office?.buildingCode) {
@@ -1490,11 +1727,13 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                         >
                           {/* 1. Walk to Office (hidden once already at office) */}
                           {showWalkToOffice && (
-                            <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] px-2.5 py-1 flex items-center justify-between gap-2 text-[11px] shrink-0">
+                            <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] px-2.5 py-1 flex items-center justify-between gap-2 text-[13px] sm:text-[11px] shrink-0">
                               <div className="flex items-center gap-1.5 min-w-0">
-                                <Footprints className="w-3.5 h-3.5 shrink-0 text-[var(--sky)]" />
+                                <Footprints className="w-4 h-4 sm:w-3.5 sm:h-3.5 shrink-0 text-[var(--sky)]" />
                                 <span className="font-bold truncate">
-                                  {leg.fromMeeting.buildingCode} → Office {officeCode} · {nxtDep.toOfficeWalkMinutes}m walk
+                                  {isPhoneViewport
+                                    ? `${leg.fromMeeting.buildingCode} → ${officeCode} · ${nxtDep.toOfficeWalkMinutes}m`
+                                    : `${leg.fromMeeting.buildingCode} → Office ${officeCode} · ${nxtDep.toOfficeWalkMinutes}m walk`}
                                 </span>
                               </div>
                               <a
@@ -1505,19 +1744,20 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                                 )}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[10px] font-bold shadow-2xs transition-colors shrink-0"
+                                aria-label="Route"
+                                className="inline-flex items-center justify-center gap-1 min-w-[40px] min-h-[40px] sm:min-w-0 sm:min-h-0 px-2 py-0.5 rounded-md bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[13px] sm:text-[10px] font-bold shadow-2xs transition-colors shrink-0"
                                 title="Open walking directions to office in Google Maps"
                               >
-                                <Navigation className="w-2.5 h-2.5" />
-                                <span>Route</span>
-                                <ExternalLink className="w-2 h-2 opacity-75" />
+                                <Navigation className="w-4 h-4 sm:w-2.5 sm:h-2.5" />
+                                <span className="hidden sm:inline">Route</span>
+                                <ExternalLink className="hidden sm:inline w-2 h-2 opacity-75" />
                               </a>
                             </div>
                           )}
 
                           {/* 2. At Your Office Block (--bg-hover) */}
                           {showAtOffice && (
-                            <div className="flex-1 min-h-[24px] rounded-lg border border-[var(--border)] bg-[var(--bg-hover)] text-[var(--text-primary)] px-2.5 py-1 flex items-center justify-between gap-2 text-[11px]">
+                            <div className="flex-1 min-h-[24px] rounded-lg border border-[var(--border)] bg-[var(--bg-hover)] text-[var(--text-primary)] px-2.5 py-1 flex items-center justify-between gap-2 text-[13px] sm:text-[11px]">
                               <span className="font-bold truncate">
                                 🏢 At your office · {startLabel} – {nxtDep.leaveByTime12h}
                               </span>
@@ -1526,12 +1766,23 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
 
                           {/* 3. Walk from Office to Next Meeting */}
                           {showWalkFromOffice && (
-                            <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] px-2.5 py-1 flex items-center justify-between gap-2 text-[11px] shrink-0">
+                            <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] px-2.5 py-1 flex items-center justify-between gap-2 text-[13px] sm:text-[11px] shrink-0">
                               <div className="flex items-center gap-1.5 min-w-0">
-                                <Footprints className="w-3.5 h-3.5 shrink-0 text-[var(--sky)]" />
-                                <span className="font-bold truncate">
-                                  Office {officeCode} → {leg.toMeeting.buildingCode} · {nxtDep.walkMinutes}m walk · leave by {nxtDep.leaveByTime12h}
-                                </span>
+                                <Footprints className="w-4 h-4 sm:w-3.5 sm:h-3.5 shrink-0 text-[var(--sky)]" />
+                                {isPhoneViewport ? (
+                                  <div className="min-w-0 leading-tight">
+                                    <div className="font-bold truncate">
+                                      {officeCode} → {leg.toMeeting.buildingCode} · {nxtDep.walkMinutes}m
+                                    </div>
+                                    <div className="text-[13px] text-[var(--text-secondary)] font-semibold truncate">
+                                      leave by {nxtDep.leaveByTime12h}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="font-bold truncate">
+                                    Office {officeCode} → {leg.toMeeting.buildingCode} · {nxtDep.walkMinutes}m walk · leave by {nxtDep.leaveByTime12h}
+                                  </span>
+                                )}
                               </div>
                               <a
                                 href={getGoogleMapsDirectionsUrl(
@@ -1541,12 +1792,13 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                                 )}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[10px] font-bold shadow-2xs transition-colors shrink-0"
+                                aria-label="Route"
+                                className="inline-flex items-center justify-center gap-1 min-w-[40px] min-h-[40px] sm:min-w-0 sm:min-h-0 px-2 py-0.5 rounded-md bg-[var(--bg-main)] border border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white text-[13px] sm:text-[10px] font-bold shadow-2xs transition-colors shrink-0"
                                 title="Open walking directions from office in Google Maps"
                               >
-                                <Navigation className="w-2.5 h-2.5" />
-                                <span>Route</span>
-                                <ExternalLink className="w-2 h-2 opacity-75" />
+                                <Navigation className="w-4 h-4 sm:w-2.5 sm:h-2.5" />
+                                <span className="hidden sm:inline">Route</span>
+                                <ExternalLink className="hidden sm:inline w-2 h-2 opacity-75" />
                               </a>
                             </div>
                           )}
@@ -1556,7 +1808,10 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
 
                     const isCompactGap = gapMin < 18;
                     const topPx = slotTopPx + (isCompactGap ? 1 : 2);
-                    const heightPx = Math.max(isCompactGap ? 26 : 30, slotSpanPx - 4);
+                    const heightPx = Math.max(
+                      isPhoneViewport ? 44 : isCompactGap ? 26 : 30,
+                      slotSpanPx - 4
+                    );
                     const isStillAhead =
                       !isToday || parseTimeToMinutes(leg.toMeeting.startTime) > currentMinutes;
                     const isLate =
@@ -1568,6 +1823,76 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                       (Boolean(resolvedByMeetingId[leg.toMeeting.id]) ||
                         Boolean(resolvedByMeetingId[leg.fromMeeting.id]));
                     const isShortLateGap = isLate && gapMin >= 0 && gapMin < 5;
+
+                    if (isPhoneViewport) {
+                      return (
+                        <div
+                          key={leg.id}
+                          className={`absolute left-2.5 right-2.5 rounded-lg border px-2.5 flex items-center justify-between gap-2 z-10 text-[13px] leading-tight ${
+                            isShortLateGap
+                              ? 'border-[var(--status-late-fg)]/40 bg-[var(--status-late-bg)] text-[var(--status-late-fg)]'
+                              : 'border-dashed border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)]'
+                          }`}
+                          style={{ top: `${topPx}px`, height: `${heightPx}px` }}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {isResolved ? (
+                              <CheckCircle2 className="w-4 h-4 shrink-0 text-[var(--status-ok-fg)]" />
+                            ) : (
+                              <Footprints
+                                className={`w-4 h-4 shrink-0 ${
+                                  isLate
+                                    ? 'text-[var(--status-late-fg)]'
+                                    : isTight
+                                    ? 'text-[var(--status-tight-fg)]'
+                                    : 'text-[var(--sky)]'
+                                }`}
+                              />
+                            )}
+                            <span className="font-bold truncate">
+                              {leg.fromMeeting.buildingCode} → {leg.toMeeting.buildingCode} ·{' '}
+                              {leg.questFlowTravelMinutes}m
+                            </span>
+                            {isLate && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--status-late-bg)] text-[var(--status-late-fg)] text-[13px] font-extrabold shrink-0">
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Late</span>
+                              </span>
+                            )}
+                            {isTight && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--status-tight-bg)] text-[var(--status-tight-fg)] text-[13px] font-extrabold shrink-0">
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                <span>Tight</span>
+                              </span>
+                            )}
+                            {isResolved && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] text-[13px] font-extrabold shrink-0">
+                                <Check className="w-3.5 h-3.5 shrink-0" />
+                                <span>Fixed</span>
+                              </span>
+                            )}
+                          </div>
+                          <a
+                            href={getGoogleMapsDirectionsUrl(
+                              leg.fromMeeting.buildingCode,
+                              leg.toMeeting.buildingCode,
+                              'walking'
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Route"
+                            className={`inline-flex items-center justify-center min-w-[40px] min-h-[40px] px-2 rounded-lg border text-[13px] font-bold shadow-2xs transition-colors shrink-0 ${
+                              isShortLateGap
+                                ? 'bg-[var(--bg-card)] border-[var(--status-late-fg)]/30 text-[var(--status-late-fg)] hover:bg-[var(--status-late-fg)] hover:text-white'
+                                : 'bg-[var(--bg-main)] border-[var(--border)] text-[var(--sky-strong)] hover:bg-[var(--sky-strong)] hover:text-white'
+                            }`}
+                            title="Open walking directions in Google Maps"
+                          >
+                            <Navigation className="w-4 h-4" />
+                          </a>
+                        </div>
+                      );
+                    }
 
                     if (isShortLateGap) {
                       return (
@@ -1737,20 +2062,25 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                   const format = meeting.format || (meeting.isOnline ? 'online' : 'in_person');
                   const isOnline = isMeetingOnline(meeting);
                   const isLocationUnknown = isMeetingLocationUnknown(meeting);
-                  const durationMin = endMin - startMin;
-                  const topPx = timelineLayout.getTopPxForMin(startMin, true);
-                  const bottomPx = timelineLayout.getTopPxForMin(endMin, false);
-                  const heightPx = Math.max(52, bottomPx - topPx - 2);
-                  const isCompact = heightPx < 76;
-
                   const isInProgress =
                     isToday && startMin <= currentMinutes && currentMinutes < endMin;
                   const minsLeft = isInProgress ? endMin - currentMinutes : 0;
-
                   const targetProblem = problemByTargetId[meeting.id];
                   const isTightProblem = targetProblem?.leg.status === 'TIGHT';
                   const isInlineResolved =
                     !targetProblem && Boolean(resolvedByMeetingId[meeting.id]);
+                  const hasLine3 = Boolean(isInProgress || targetProblem || isInlineResolved);
+
+                  const durationMin = endMin - startMin;
+                  const topPx = timelineLayout.getTopPxForMin(startMin, true);
+                  const bottomPx = timelineLayout.getTopPxForMin(endMin, false);
+                  const minCardHeightPx = isPhoneViewport
+                    ? hasLine3
+                      ? 112
+                      : 72
+                    : 52;
+                  const heightPx = Math.max(minCardHeightPx, bottomPx - topPx - 2);
+                  const isCompact = heightPx < 76;
 
                   const mapsUrl =
                     !isOnline && !isLocationUnknown
@@ -1760,7 +2090,7 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                   const widthPct = 100 / totalCols;
                   const leftPct = col * widthPct;
                   const cardWidthPx = canvasWidth / totalCols - 16;
-                  const isNarrowCard = totalCols > 1 || cardWidthPx < 320;
+                  const isNarrowCard = isPhoneViewport || totalCols > 1 || cardWidthPx < 320;
                   const isMenuOpen = openMenuMeetingId === meeting.id;
 
                   const locCompact = isOnline
@@ -1768,6 +2098,10 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                     : isLocationUnknown
                     ? 'Set location'
                     : `${meeting.buildingCode}${meeting.roomNumber ? ` ${meeting.roomNumber}` : ''}`;
+                  const phoneTimeAndPlace = `${formatTimeRangePhone(
+                    meeting.startTime,
+                    meeting.endTime
+                  )} · ${locCompact}`;
 
                   return (
                     <div
@@ -1793,69 +2127,85 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                       }}
                     >
                       {isNarrowCard ? (
-                        /* NARROW CARD (< ~320px): 2-line title, 1-line "STC 2018 · 9:30–10:30", status badge, and "⋯" menu */
-                        <div className="px-2.5 py-1.5 flex items-start justify-between gap-1.5 h-full relative">
+                        /* PHONE (< 640px) & NARROW CARD:
+                           Line 1: title (up to 2 lines, then "…")
+                           Line 2: time and place, e.g. "1:45–2:30 PM · NH 3001" (one line, truncate with "…")
+                           Line 3 (only if there is one): status badge and "Fix this"
+                           Top-right "⋯" menu for Maps, Campus/Teams, Edit, Delete */
+                        <div className="px-2.5 py-2 flex items-start justify-between gap-1.5 h-full relative">
                           <div className="min-w-0 flex-1 flex flex-col justify-between h-full">
-                            <div>
-                              <h3 className={`text-xs font-extrabold line-clamp-2 leading-tight ${format === 'online' ? 'text-[var(--text-primary)]' : 'text-[var(--sky-strong)]'}`}>
+                            <div className="min-w-0">
+                              <h3
+                                className={`text-[13px] sm:text-xs font-extrabold line-clamp-2 leading-tight ${
+                                  format === 'online'
+                                    ? 'text-[var(--text-primary)]'
+                                    : 'text-[var(--sky-strong)]'
+                                }`}
+                              >
                                 {meeting.title}
                               </h3>
-                              <p className={`text-[11px] font-semibold truncate mt-0.5 tabular-nums ${format === 'online' ? 'text-[var(--text-secondary)]' : 'text-[var(--sky-strong)]'}`}>
-                                {locCompact} · {formatTimeCompact(meeting.startTime)}–{formatTimeCompact(meeting.endTime)}
+                              <p
+                                className={`text-[13px] sm:text-[11px] font-semibold truncate mt-0.5 tabular-nums ${
+                                  format === 'online'
+                                    ? 'text-[var(--text-secondary)]'
+                                    : 'text-[var(--sky-strong)]'
+                                }`}
+                              >
+                                {phoneTimeAndPlace}
                               </p>
                             </div>
 
-                            <div className="flex items-center gap-1 flex-wrap mt-1">
-                              {isInProgress && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--sky-strong)] text-white text-[10px] font-extrabold uppercase shrink-0">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                                  <span>{minsLeft}m left</span>
-                                </span>
-                              )}
-                              {targetProblem && (
-                                <span
-                                  id={`transition-problem-${meeting.id}`}
-                                  className="inline-flex items-center gap-1 flex-wrap"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <span
-                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold truncate max-w-[180px] ${
-                                      targetProblem.isOverlap ? '' : 'uppercase'
-                                    } ${
-                                      isTightProblem
-                                        ? 'bg-[var(--status-tight-bg)] text-[var(--status-tight-fg)]'
-                                        : 'bg-[var(--status-late-bg)] text-[var(--status-late-fg)]'
-                                    }`}
-                                    title={targetProblem.badgeText}
-                                  >
-                                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                                    <span className="truncate">{targetProblem.badgeText}</span>
+                            {hasLine3 && (
+                              <div className="flex items-center gap-1.5 flex-nowrap mt-1 min-w-0">
+                                {isInProgress && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--sky-strong)] text-white text-[13px] sm:text-[10px] font-extrabold shrink-0">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                                    <span>{minsLeft}m left</span>
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenFixSheet(targetProblem)}
-                                    className={`px-2 py-0.5 rounded text-white text-[10px] font-extrabold shadow-2xs transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sky-strong)] ${
-                                      isTightProblem
-                                        ? 'bg-[var(--status-tight-fg)] hover:opacity-90'
-                                        : 'bg-[var(--status-late-fg)] hover:opacity-90'
-                                    }`}
+                                )}
+                                {targetProblem && (
+                                  <span
+                                    id={`transition-problem-${meeting.id}`}
+                                    className="inline-flex items-center gap-1.5 min-w-0"
+                                    onClick={(e) => e.stopPropagation()}
                                   >
-                                    Fix this
-                                  </button>
-                                </span>
-                              )}
-                              {isInlineResolved && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] text-[10px] font-extrabold uppercase shrink-0">
-                                  <Check className="w-2.5 h-2.5" />
-                                  <span>Fixed</span>
-                                </span>
-                              )}
-                            </div>
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[13px] sm:text-[10px] font-extrabold truncate ${
+                                        isTightProblem
+                                          ? 'bg-[var(--status-tight-bg)] text-[var(--status-tight-fg)]'
+                                          : 'bg-[var(--status-late-bg)] text-[var(--status-late-fg)]'
+                                      }`}
+                                      title={targetProblem.badgeText}
+                                    >
+                                      <AlertTriangle className="w-3.5 h-3.5 sm:w-2.5 sm:h-2.5 shrink-0" />
+                                      <span className="truncate">{targetProblem.badgeText}</span>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenFixSheet(targetProblem)}
+                                      className={`inline-flex items-center justify-center min-h-[40px] sm:min-h-0 px-2.5 sm:px-2 py-1 sm:py-0.5 rounded-lg sm:rounded text-white text-[13px] sm:text-[10px] font-extrabold shadow-2xs transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sky-strong)] ${
+                                        isTightProblem
+                                          ? 'bg-[var(--status-tight-fg)] hover:opacity-90'
+                                          : 'bg-[var(--status-late-fg)] hover:opacity-90'
+                                      }`}
+                                    >
+                                      Fix this
+                                    </button>
+                                  </span>
+                                )}
+                                {isInlineResolved && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--status-ok-bg)] text-[var(--status-ok-fg)] text-[13px] sm:text-[10px] font-extrabold shrink-0">
+                                    <Check className="w-3.5 h-3.5 sm:w-2.5 sm:h-2.5" />
+                                    <span>Fixed</span>
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
 
                           {/* Single "⋯" menu button */}
                           <div
-                            className="relative shrink-0"
+                            className="relative shrink-0 -mt-1 -mr-1"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <button
@@ -1864,22 +2214,22 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                                 setOpenMenuMeetingId(isMenuOpen ? null : meeting.id)
                               }
                               aria-label="More actions"
-                              className="p-1 rounded-lg bg-[var(--bg-main)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer text-xs font-bold leading-none"
+                              className="inline-flex items-center justify-center min-w-[40px] min-h-[40px] sm:min-w-0 sm:min-h-0 p-1.5 sm:p-1 rounded-lg bg-[var(--bg-main)] border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer text-[15px] sm:text-xs font-bold leading-none"
                             >
                               ⋯
                             </button>
 
                             {isMenuOpen && (
-                              <div className="absolute right-0 top-7 w-40 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-xl py-1 z-40 text-xs font-semibold">
+                              <div className="absolute right-0 top-10 sm:top-7 w-44 sm:w-40 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-xl py-1 z-40 text-[13px] sm:text-xs font-semibold">
                                 {!isOnline && !isLocationUnknown && (
                                     <a
                                       href={mapsUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       onClick={() => setOpenMenuMeetingId(null)}
-                                      className="flex items-center gap-2 px-3 py-1.5 text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                                      className="flex items-center gap-2 min-h-[40px] sm:min-h-0 px-3 py-2 sm:py-1.5 text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                                     >
-                                      <Navigation className="w-3.5 h-3.5 text-[var(--sky)]" />
+                                      <Navigation className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-[var(--sky)]" />
                                       <span>Open in Maps</span>
                                     </a>
                                   )}
@@ -1892,9 +2242,9 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                                     );
                                     setOpenMenuMeetingId(null);
                                   }}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                                  className="w-full flex items-center gap-2 min-h-[40px] sm:min-h-0 px-3 py-2 sm:py-1.5 text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
                                 >
-                                  <Video className="w-3.5 h-3.5 text-[var(--sky)]" />
+                                  <Video className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-[var(--sky)]" />
                                   <span>{isOnline ? 'Switch to Campus' : 'Switch to Teams'}</span>
                                 </button>
                                 <button
@@ -1903,9 +2253,9 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                                     setOpenMenuMeetingId(null);
                                     onEditMeeting(meeting);
                                   }}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                                  className="w-full flex items-center gap-2 min-h-[40px] sm:min-h-0 px-3 py-2 sm:py-1.5 text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer"
                                 >
-                                  <Edit3 className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                                  <Edit3 className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-[var(--text-muted)]" />
                                   <span>Edit</span>
                                 </button>
                                 <button
@@ -1914,9 +2264,9 @@ export const CalendarReviewPage: React.FC<CalendarReviewPageProps> = ({
                                     setOpenMenuMeetingId(null);
                                     onDeleteMeeting(meeting.id);
                                   }}
-                                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[var(--status-late-fg)] hover:bg-[var(--status-late-bg)] cursor-pointer"
+                                  className="w-full flex items-center gap-2 min-h-[40px] sm:min-h-0 px-3 py-2 sm:py-1.5 text-left text-[var(--status-late-fg)] hover:bg-[var(--status-late-bg)] cursor-pointer"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                                   <span>Delete</span>
                                 </button>
                               </div>
